@@ -1,0 +1,62 @@
+name: Rust Build and Release for Linux
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [x86_64]
+        target: [x86_64-unknown-linux-gnu]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install OpenSSL
+      run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: stable
+        targets: ${{ matrix.target }}
+
+    - name: Get the release version from the tag
+      shell: bash
+      run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+
+    - name: Build
+      run: cargo build --verbose --release --target ${{ matrix.target }}
+
+    - name: Prepare binary
+      shell: bash
+      run: |
+        binary_name="lc"
+        dirname="$binary_name-${{ env.VERSION }}-${{ matrix.target }}"
+        mkdir -p "$dirname"
+        mv "target/${{ matrix.target }}/release/$binary_name" "$dirname/"
+        strip "$dirname/$binary_name"
+
+    - name: Compress and archive
+      shell: bash
+      run: |
+        binary_name="lc"
+        dirname="$binary_name-${{ env.VERSION }}-${{ matrix.target }}"
+        archive_name="$dirname.tar.gz"
+        if [ -d "$dirname" ]; then
+          tar -czf "$archive_name" "$dirname"
+          echo "ASSET=$archive_name" >> $GITHUB_ENV
+        else
+          echo "Error: Directory $dirname does not exist."
+          exit 1
+        fi
+
+    - name: Release upload
+      uses: softprops/action-gh-release@v2
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: ${{ env.ASSET }}
