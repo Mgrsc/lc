@@ -6,7 +6,7 @@ use clap::{Parser, CommandFactory};
 use config::Config;
 use openai::{chat_completion, Message};
 use std::io::{self, Read};
-use std::path::Path;
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -104,10 +104,16 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+fn get_memory_file_path() -> Result<PathBuf> {
+    let mut path = Config::lc_dir()?;
+    path.push("conversation_memory.json");
+    Ok(path)
+}
+
 fn clear_memory() -> Result<()> {
-    let memory_file = Path::new("conversation_memory.json");
+    let memory_file = get_memory_file_path()?;
     if memory_file.exists() {
-        std::fs::remove_file(memory_file).context("Failed to remove memory file")?;
+        std::fs::remove_file(&memory_file).context("Failed to remove memory file")?;
         println!("Conversation memory has been cleared.");
     } else {
         println!("No conversation memory found.");
@@ -128,15 +134,23 @@ fn save_messages(messages: &[Message], max_history: usize) -> Result<()> {
         .collect();
 
     let serialized = serde_json::to_string(&messages_to_save).context("Failed to serialize messages")?;
-    std::fs::write("conversation_memory.json", serialized).context("Failed to write memory file")?;
+
+    let memory_file = get_memory_file_path()?;
+
+    if let Some(parent) = memory_file.parent() {
+        std::fs::create_dir_all(parent).context("Failed to create memory directory")?;
+    }
+    std::fs::write(memory_file, serialized).context("Failed to write memory file")?;
     Ok(())
 }
 
 fn load_messages() -> Result<Vec<Message>> {
-    let content = std::fs::read_to_string("conversation_memory.json").context("Failed to read memory file")?;
+    let memory_file = get_memory_file_path()?;
+    let content = std::fs::read_to_string(memory_file).context("Failed to read memory file")?;
     let messages: Vec<Message> = serde_json::from_str(&content).context("Failed to parse memory file")?;
     Ok(messages)
 }
+
 
 fn set_config(config: &mut Config, set_arg: &str) -> Result<()> {
     let parts: Vec<&str> = set_arg.splitn(2, '=').collect();
@@ -171,4 +185,3 @@ fn get_input() -> Result<String> {
         Ok(format!("Input: {}", buffer.trim()))
     }
 }
-

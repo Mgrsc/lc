@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::fs;
 
 const DEFAULT_MAX_HISTORY: usize = 10;
-const DEFAULT_SYSTEM_PROMPT: &str = "You are a professional Linux command-line assistant named lc. Your task is to answer users' questions about Linux commands, operations, and issues. Please follow these guidelines:
+const DEFAULT_SYSTEM_PROMPT: &str = "You are a professional Linux command-line assistant named lc. Your task is to answer users' questions about Linux commands, operations, andissues. Please follow these guidelines:
 
   1. Answer user questions directly, without using any Markdown formatting or text formatting (such as bold, italics, etc.).
   2. Keep answers concise and clear, suitable for display on a command-line interface.
@@ -77,6 +77,15 @@ impl Config {
             })
             .ok_or_else(|| anyhow::anyhow!("Failed to get config directory"))
     }
+
+    pub fn lc_dir() -> Result<PathBuf> {
+        dirs::config_dir()
+            .map(|mut path| {
+                path.push("lc");
+                path
+            })
+            .ok_or_else(|| anyhow::anyhow!("Failed to get config directory"))
+    }
 }
 
 impl Default for Config {
@@ -90,4 +99,3 @@ impl Default for Config {
         }
     }
 }
-
