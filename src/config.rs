@@ -28,10 +28,15 @@ pub struct Config {
     pub system_prompt: String,
     #[serde(default = "default_max_history")]
     pub max_history: usize,
+    #[serde(default = "default_use_system_prompt")]
+    pub use_system_prompt: bool,
 }
 
 fn default_max_history() -> usize {
     DEFAULT_MAX_HISTORY
+}
+fn default_use_system_prompt() -> bool {
+    true
 }
 
 impl Config {
@@ -63,6 +68,7 @@ impl Config {
             "default_model" => self.default_model = value.to_string(),
             "max_history" => self.max_history = value.parse().context("Invalid max_history value")?,
             "system_prompt" => self.system_prompt = value.to_string(),
+            "use_system_prompt" => self.use_system_prompt = value.parse().context("Invalid use_system_prompt value")?,
             _ => return Err(anyhow::anyhow!("Unknown config key: {}", key)),
         }
         self.save()
@@ -96,6 +102,7 @@ impl Default for Config {
             default_model: "gpt-4o-mini".to_string(),
             system_prompt: DEFAULT_SYSTEM_PROMPT.to_string(),
             max_history: DEFAULT_MAX_HISTORY,
+            use_system_prompt: true,
         }
     }
 }

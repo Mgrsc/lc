@@ -23,7 +23,7 @@ struct Cli {
     #[arg(long)]
     clear_memory: bool,
 
-    /// Set a configuration value (valid keys: openai_api_key, openai_base_url, default_model, max_history, system_prompt)
+    /// Set a configuration value (valid keys: openai_api_key, openai_base_url, default_model, max_history, system_prompt, use_system_prompt)
     #[arg(long)]
     set: Option<String>,
 
@@ -64,10 +64,14 @@ async fn main() -> Result<()> {
         println!("Input: {}", input);
     }
 
-    let mut messages = vec![Message {
-        role: "system".to_string(),
-        content: config.system_prompt.clone(),
-    }];
+    let mut messages = if config.use_system_prompt {
+        vec![Message {
+            role: "system".to_string(),
+            content: config.system_prompt.clone(),
+        }]
+    } else {
+        Vec::new()
+    };
 
     if cli.memory {
         if let Ok(prev_messages) = load_messages() {
