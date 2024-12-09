@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, CommandFactory};
 use config::Config;
 use openai::{chat_completion, Message};
-use std::io::{self, Read};
+use std::io::{self, Read, IsTerminal};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -181,7 +181,7 @@ fn get_query(cli: &Cli) -> Result<String> {
 }
 
 fn get_input() -> Result<String> {
-    if atty::is(atty::Stream::Stdin) {
+    if io::stdin().is_terminal() {
         Ok(String::new())
     } else {
         let mut buffer = String::new();
