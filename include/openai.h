@@ -6,8 +6,15 @@
 #include <functional>
 #include <optional>
 #include <nlohmann/json.hpp>
+#include <filesystem>
+#include <memory>
 
 #include "config.h"
+
+// 前向声明httplib命名空间
+namespace httplib {
+    class Client;
+}
 
 namespace lc {
 namespace openai {
@@ -48,6 +55,15 @@ ChatCompletionResult chat_completion_stream(
     const std::string& model_override = "",
     bool debug = false
 );
+
+// 规范化API URL
+std::string normalize_api_url(const std::string& base_url);
+
+// 创建HTTP客户端
+std::unique_ptr<httplib::Client> create_http_client(const std::string& host, bool use_https, bool debug);
+
+// 解析API URL
+bool parse_api_url(const std::string& url_base, std::string& host, std::string& path_prefix, bool& use_https, bool debug);
 
 // 去除字符串首尾空白字符
 std::string trim(const std::string& str);

@@ -236,9 +236,15 @@ int main(int argc, char** argv) {
     
     // 流式输出回调
     std::string accumulated_response;
-    auto stream_callback = [&accumulated_response, debug](const std::string& delta, bool is_done) {
+    bool need_newline_at_end = false;
+    auto stream_callback = [&accumulated_response, &need_newline_at_end, debug](const std::string& delta, bool is_done) {
         if (!is_done && !delta.empty()) {
+            // 处理换行符，确保内容格式正确
+            accumulated_response += delta;
             std::cout << delta << std::flush;
+            
+            // 如果消息不是以换行符结尾，那么最后需要添加一个换行符
+            need_newline_at_end = (delta.back() != '\n');
         }
     };
     
@@ -257,8 +263,10 @@ int main(int argc, char** argv) {
         return 1;
     }
     
-    // 确保最后有换行
-    std::cout << std::endl;
+    // 只有在需要时才添加最后的换行
+    if (need_newline_at_end) {
+        std::cout << std::endl;
+    }
     
     // 保存对话历史
     if (args.count("memory") && result.success) {

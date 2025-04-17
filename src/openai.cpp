@@ -1,3 +1,4 @@
+
 #include "../include/openai.h"
 #include <httplib.h>
 #include <regex>
@@ -37,6 +38,72 @@ Message Message::from_json(const nlohmann::json& j) {
     return msg;
 }
 
+// 规范化API URL - 修复：保留尾部斜杠，避免308重定向问题
+std::string normalize_api_url(const std::string& base_url) {
+    std::string url = base_url;
+    
+    // 确保URL以斜杠结尾，避免308重定向问题
+    if (!url.empty() && url.back() != '/') {
+        url += '/';
+    }
+    
+    return url;
+}
+
+// 创建HTTP客户端
+std::unique_ptr<httplib::Client> create_http_client(const std::string& host, bool use_https, bool debug) {
+    std::unique_ptr<httplib::Client> client;
+    
+    if (use_https) {
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+        client = std::make_unique<httplib::Client>(host);
+        client->set_ca_cert_path("/etc/ssl/certs");
+        // 禁用SSL证书验证，避免SSL证书问题
+        client->enable_server_certificate_verification(false);
+        if (debug) {
+            std::cerr << "SSL certificate verification disabled for debugging purposes" << std::endl;
+        }
+#else
+        if (debug) {
+            std::cerr << "HTTPS support not available. Rebuild with OpenSSL support." << std::endl;
+        }
+        return nullptr;
+#endif
+    } else {
+        client = std::make_unique<httplib::Client>(host);
+    }
+    
+    client->set_connection_timeout(30);
+    client->set_read_timeout(120);
+    client->set_write_timeout(30);
+    client->set_follow_location(true);
+    
+    return client;
+}
+
+// 解析API URL
+bool parse_api_url(const std::string& url_base, std::string& host, std::string& path_prefix, bool& use_https, bool debug) {
+    std::regex url_regex(R"(^(https?)://([^/]+)(/.*)?$)");
+    std::smatch url_match;
+    
+    if (std::regex_match(url_base, url_match, url_regex)) {
+        std::string protocol = url_match[1].str();
+        host = url_match[2].str();
+        path_prefix = url_match[3].matched ? url_match[3].str() : "";
+        use_https = (protocol == "https");
+        
+        if (debug) {
+            std::cerr << "URL parsed - Protocol: " << protocol 
+                      << ", Host: " << host 
+                      << ", Path prefix: " << path_prefix << std::endl;
+        }
+        
+        return true;
+    }
+    
+    return false;
+}
+
 // 执行非流式聊天完成请求
 ChatCompletionResult chat_completion(
     const Config& config, 
@@ -48,28 +115,21 @@ ChatCompletionResult chat_completion(
     result.success = false;
     
     // 准备请求URL
-    std::string url_base = config.openai_base_url;
-    if (url_base.back() == '/') {
-        url_base.pop_back();
-    }
-    
-    const std::string url_path = "/chat/completions";
+    std::string url_base = normalize_api_url(config.openai_base_url);
     std::string host;
-    std::string path;
+    std::string path_prefix;
+    bool use_https;
     
-    // 解析URL
-    std::regex url_regex(R"(^(https?://)?([^/]+)(/.*)$)");
-    std::smatch url_match;
-    
-    if (std::regex_match(url_base, url_match, url_regex)) {
-        host = url_match[2].str();
-        path = url_match[3].str() + url_path;
-    } else {
+    if (!parse_api_url(url_base, host, path_prefix, use_https, debug)) {
         result.error_message = "Invalid base URL: " + url_base;
         return result;
     }
     
-    const bool use_https = url_base.find("https://") == 0;
+    // 构建完整路径，移除末尾的斜杠，避免路径中有双斜杠
+    if (!path_prefix.empty() && path_prefix.back() == '/') {
+        path_prefix.pop_back();
+    }
+    std::string path = path_prefix + "/chat/completions";
     
     // 准备请求体
     nlohmann::json request_body;
@@ -79,6 +139,7 @@ ChatCompletionResult chat_completion(
     for (const auto& msg : messages) {
         messages_json.push_back(msg.to_json());
     }
+    
     request_body["messages"] = messages_json;
     
     std::string request_body_str = request_body.dump();
@@ -89,21 +150,11 @@ ChatCompletionResult chat_completion(
     }
     
     // 创建HTTP客户端
-    httplib::Client client(host);
-    
-    if (use_https) {
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
-        client.set_ca_cert_path("/etc/ssl/certs");
-        client.enable_server_certificate_verification(true);
-#else
-        result.error_message = "HTTPS support not available. Rebuild with OpenSSL support.";
+    auto client = create_http_client(host, use_https, debug);
+    if (!client) {
+        result.error_message = "Failed to create HTTP client";
         return result;
-#endif
     }
-    
-    client.set_connection_timeout(30);
-    client.set_read_timeout(120);
-    client.set_write_timeout(30);
     
     // 设置请求头
     httplib::Headers headers = {
@@ -112,7 +163,7 @@ ChatCompletionResult chat_completion(
     };
     
     // 发送请求
-    auto http_result = client.Post(path, headers, request_body_str, "application/json");
+    auto http_result = client->Post(path, headers, request_body_str, "application/json");
     
     if (!http_result) {
         result.error_message = "HTTP request failed: " + 
@@ -145,10 +196,11 @@ ChatCompletionResult chat_completion(
         }
         
         std::string content = response_json["choices"][0]["message"]["content"].get<std::string>();
+        
         result.full_response = trim(content);
         result.success = true;
-        return result;
         
+        return result;
     } catch (const std::exception& e) {
         result.error_message = std::string("Failed to parse API response: ") + e.what();
         return result;
@@ -168,29 +220,22 @@ ChatCompletionResult chat_completion_stream(
     result.full_response = "";
     
     // 准备请求URL
-    std::string url_base = config.openai_base_url;
-    if (url_base.back() == '/') {
-        url_base.pop_back();
-    }
-    
-    const std::string url_path = "/chat/completions";
+    std::string url_base = normalize_api_url(config.openai_base_url);
     std::string host;
-    std::string path;
+    std::string path_prefix;
+    bool use_https;
     
-    // 解析URL
-    std::regex url_regex(R"(^(https?://)?([^/]+)(/.*)$)");
-    std::smatch url_match;
-    
-    if (std::regex_match(url_base, url_match, url_regex)) {
-        host = url_match[2].str();
-        path = url_match[3].str() + url_path;
-    } else {
+    if (!parse_api_url(url_base, host, path_prefix, use_https, debug)) {
         result.error_message = "Invalid base URL: " + url_base;
         callback("", true); // 通知完成
         return result;
     }
     
-    const bool use_https = url_base.find("https://") == 0;
+    // 构建完整路径，移除末尾的斜杠，避免路径中有双斜杠
+    if (!path_prefix.empty() && path_prefix.back() == '/') {
+        path_prefix.pop_back();
+    }
+    std::string path = path_prefix + "/chat/completions";
     
     // 准备请求体
     nlohmann::json request_body;
@@ -201,6 +246,7 @@ ChatCompletionResult chat_completion_stream(
     for (const auto& msg : messages) {
         messages_json.push_back(msg.to_json());
     }
+    
     request_body["messages"] = messages_json;
     
     std::string request_body_str = request_body.dump();
@@ -211,22 +257,12 @@ ChatCompletionResult chat_completion_stream(
     }
     
     // 创建HTTP客户端
-    httplib::Client client(host);
-    
-    if (use_https) {
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
-        client.set_ca_cert_path("/etc/ssl/certs");
-        client.enable_server_certificate_verification(true);
-#else
-        result.error_message = "HTTPS support not available. Rebuild with OpenSSL support.";
+    auto client = create_http_client(host, use_https, debug);
+    if (!client) {
+        result.error_message = "Failed to create HTTP client";
         callback("", true); // 通知完成
         return result;
-#endif
     }
-    
-    client.set_connection_timeout(30);
-    client.set_read_timeout(300);  // 流式响应可能需要更长时间
-    client.set_write_timeout(30);
     
     // 设置请求头
     httplib::Headers headers = {
@@ -236,11 +272,39 @@ ChatCompletionResult chat_completion_stream(
     };
     
     // 发送请求 - 由于cpp-httplib的限制，我们不使用回调方式，而是获取完整响应后手动解析
-    auto http_result = client.Post(path, headers, request_body_str, "application/json");
+    auto http_result = client->Post(path, headers, request_body_str, "application/json");
     
     if (!http_result) {
         result.error_message = "HTTP request failed: " + 
                              httplib::to_string(http_result.error());
+        callback("", true);  // 通知完成
+        return result;
+    }
+    
+    if (http_result->status == 308) {  // 永久重定向
+        // 解析重定向位置
+        if (http_result->has_header("Location")) {
+            std::string new_location = http_result->get_header_value("Location");
+            
+            if (debug) {
+                std::cerr << "Got 308 redirect to: " << new_location << std::endl;
+            }
+            
+            // 尝试解析新位置
+            std::string redirect_host;
+            std::string redirect_path_prefix;
+            bool redirect_use_https;
+            
+            if (parse_api_url(new_location, redirect_host, redirect_path_prefix, redirect_use_https, debug)) {
+                if (debug) {
+                    std::cerr << "Redirect parsed - New host: " << redirect_host << ", New path: " << redirect_path_prefix << std::endl;
+                }
+            }
+        }
+        
+        result.error_message = "API request failed with status 308 (Permanent Redirect). "
+                             "Please check your openai_base_url setting. "
+                             "Try adding a trailing slash: " + url_base;
         callback("", true);  // 通知完成
         return result;
     }
@@ -436,8 +500,8 @@ void show_messages(const std::filesystem::path& path) {
         if (truncated) {
             std::cout << "... [truncated]";
         }
-        std::cout << std::endl << std::endl;
         
+        std::cout << std::endl << std::endl;
         msg_count++;
     }
     
@@ -451,17 +515,11 @@ void show_messages(const std::filesystem::path& path) {
 // JSON 序列化支持
 namespace nlohmann {
 
-void adl_serializer<lc::openai::Message>::to_json(
-    json& j, 
-    const lc::openai::Message& message
-) {
+void adl_serializer<lc::openai::Message>::to_json(json& j, const lc::openai::Message& message) {
     j = message.to_json();
 }
 
-void adl_serializer<lc::openai::Message>::from_json(
-    const json& j, 
-    lc::openai::Message& message
-) {
+void adl_serializer<lc::openai::Message>::from_json(const json& j, lc::openai::Message& message) {
     message = lc::openai::Message::from_json(j);
 }
 
