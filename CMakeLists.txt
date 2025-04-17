@@ -9,19 +9,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # 获取外部依赖
 include(FetchContent)
 
-# 获取httplib - HTTP客户端，禁用压缩相关功能
-FetchContent_Declare(
-    httplib
-    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
-    GIT_TAG v0.20.0
-)
-
-# 禁用 httplib 的压缩功能，以避免 zstd 依赖
-set(HTTPLIB_REQUIRE_ZLIB OFF CACHE BOOL "Require zlib for httplib" FORCE)
-set(HTTPLIB_COMPILE ON CACHE BOOL "Build cpp-httplib" FORCE)
-set(HTTPLIB_USE_ZLIB_IF_AVAILABLE OFF CACHE BOOL "Use zlib if available" FORCE)
-set(HTTPLIB_USE_BROTLI_IF_AVAILABLE OFF CACHE BOOL "Use brotli if available" FORCE)
-set(HTTPLIB_USE_OPENSSL_IF_AVAILABLE ON CACHE BOOL "Use OpenSSL if available" FORCE)
+# 不使用 FetchContent 获取 httplib，而是直接下载单头文件版本
+file(DOWNLOAD 
+     "https://github.com/yhirose/cpp-httplib/raw/v0.20.0/httplib.h"
+     "${CMAKE_CURRENT_BINARY_DIR}/include/httplib.h"
+     SHOW_PROGRESS)
 
 # 获取nlohmann_json - JSON解析
 FetchContent_Declare(
@@ -44,10 +36,8 @@ FetchContent_Declare(
     GIT_TAG v3.2.1
 )
 
-# 移除 find_package(Zstd REQUIRED) 这一行
-
 # 使所有依赖可用
-FetchContent_MakeAvailable(httplib nlohmann_json yaml-cpp cxxopts)
+FetchContent_MakeAvailable(nlohmann_json yaml-cpp cxxopts)
 
 # 添加可执行文件
 add_executable(lc
@@ -59,16 +49,23 @@ add_executable(lc
 # 设置包含路径
 target_include_directories(lc PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${httplib_SOURCE_DIR}/
+    ${CMAKE_CURRENT_BINARY_DIR}/include  # 添加下载的 httplib.h 所在目录
 )
+
+# 定义 CPPHTTPLIB_OPENSSL_SUPPORT 以启用 SSL 支持
+target_compile_definitions(lc PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
 
 # 链接依赖库
 target_link_libraries(lc PRIVATE
-    httplib::httplib
     nlohmann_json::nlohmann_json
     yaml-cpp
     cxxopts::cxxopts
+    OpenSSL::SSL
+    OpenSSL::Crypto
 )
+
+# 查找 OpenSSL
+find_package(OpenSSL REQUIRED)
 
 # 根据平台添加必要的链接
 if(UNIX AND NOT APPLE)
