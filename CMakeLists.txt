@@ -6,6 +6,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# 静态链接标准库，解决 glibc 和 libstdc++ 版本依赖问题
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libgcc -static-libstdc++")
+
 # 获取外部依赖
 include(FetchContent)
 
@@ -39,6 +42,9 @@ FetchContent_Declare(
 # 使所有依赖可用
 FetchContent_MakeAvailable(nlohmann_json yaml-cpp cxxopts)
 
+# 查找 OpenSSL
+find_package(OpenSSL REQUIRED)
+
 # 添加可执行文件
 add_executable(lc
     src/main.cpp
@@ -63,9 +69,6 @@ target_link_libraries(lc PRIVATE
     OpenSSL::SSL
     OpenSSL::Crypto
 )
-
-# 查找 OpenSSL
-find_package(OpenSSL REQUIRED)
 
 # 根据平台添加必要的链接
 if(UNIX AND NOT APPLE)
